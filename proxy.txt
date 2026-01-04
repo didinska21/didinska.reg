@@ -1,9 +1,1 @@
-# Referral Code
-REFERRAL_CODE=EARN1D7265
-
-# Headless mode (true/false)
-HEADLESS=true
-
-# File paths
-ACCOUNT_FILE=account_data.json
-PROXY_FILE=proxy.txt
+http://81634571-zone-custom-region-JP:g93c7o0n@as.proxys5.net:6200
