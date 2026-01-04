@@ -129,17 +129,59 @@ async function registerWithBrowser(userData, proxyUrl = null) {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--ignore-certificate-errors',
+        '--ignore-certificate-errors-spki-list'
       ]
     };
     
+    // Setup proxy dengan format yang benar
     if (proxyUrl) {
-      launchOptions.args.push(`--proxy-server=${proxyUrl}`);
+      // Parse proxy URL untuk extract credentials
+      const proxyMatch = proxyUrl.match(/^(https?):\/\/(.+):(.+)@(.+):(\d+)$/);
+      
+      if (proxyMatch) {
+        const [, protocol, username, password, host, port] = proxyMatch;
+        
+        // Set proxy server tanpa credentials di args
+        launchOptions.args.push(`--proxy-server=${protocol}://${host}:${port}`);
+        
+        // Launch browser
+        browser = await puppeteer.launch(launchOptions);
+        const page = await browser.newPage();
+        
+        // Authenticate dengan credentials
+        await page.authenticate({
+          username: username,
+          password: password
+        });
+        
+        await page.setViewport({ width: 1280, height: 720 });
+        
+        // Set user agent agar lebih natural
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+      } else {
+        // Proxy tanpa auth
+        launchOptions.args.push(`--proxy-server=${proxyUrl}`);
+        browser = await puppeteer.launch(launchOptions);
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 720 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      }
+    } else {
+      // No proxy
+      browser = await puppeteer.launch(launchOptions);
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 720 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     }
     
-    browser = await puppeteer.launch(launchOptions);
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 720 });
+    // Get page (sudah dibuat di atas)
+    const pages = await browser.pages();
+    const page = pages[pages.length - 1];
 
     await page.goto(CONFIG.registerURL, {
       waitUntil: 'networkidle2',
@@ -238,7 +280,11 @@ async function registerWithBrowser(userData, proxyUrl = null) {
     };
 
   } catch (error) {
-    if (browser) await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (e) {}
+    }
     
     return {
       success: false,
