@@ -1,46 +1,25 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const readline = require('readline');
+require('dotenv').config();
 
-// Konfigurasi
+// Konfigurasi dari .env
 const CONFIG = {
-  registerURL: 'https://cryptowave.blog/auth?ref=EARN1D7265',
-  referralCode: 'EARN1D7265',
-  headless: true,
-  accountDataFile: 'account_data.json'
+  registerURL: `https://cryptowave.blog/auth?ref=${process.env.REFERRAL_CODE || 'EARN1D7265'}`,
+  referralCode: process.env.REFERRAL_CODE || 'EARN1D7265',
+  headless: process.env.HEADLESS === 'false' ? false : true,
+  accountDataFile: process.env.ACCOUNT_FILE || 'account_data.json'
 };
 
 // Proxy Configuration
 const PROXY = {
-  enabled: false, // Set true untuk enable proxy
-  file: 'proxy.txt', // File berisi proxy (1 proxy yang auto-rotate IP)
-  url: null // Akan di-load dari file
+  enabled: false,
+  mode: 'static', // 'static' atau 'rotating'
+  file: process.env.PROXY_FILE || 'proxy.txt',
+  list: [] // Untuk rotating proxy
 };
 
-// Load proxy dari file
-function loadProxy() {
-  if (!PROXY.enabled) return null;
-  
-  if (PROXY.url) return PROXY.url; // Sudah di-load sebelumnya
-  
-  try {
-    if (fs.existsSync(PROXY.file)) {
-      const proxyContent = fs.readFileSync(PROXY.file, 'utf8').trim();
-      if (proxyContent) {
-        PROXY.url = proxyContent;
-        console.log(`✓ Proxy loaded from ${PROXY.file}`);
-        return PROXY.url;
-      }
-    }
-    console.log(`⚠ ${PROXY.file} not found or empty. Running without proxy.`);
-    PROXY.enabled = false;
-    return null;
-  } catch (e) {
-    console.log(`⚠ Error loading proxy: ${e.message}`);
-    PROXY.enabled = false;
-    return null;
-  }
-}
+// Input dari terminal
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
@@ -48,6 +27,50 @@ const rl = readline.createInterface({
 
 function question(query) {
   return new Promise(resolve => rl.question(query, resolve));
+}
+
+// Load proxy dari file
+function loadProxy() {
+  if (!PROXY.enabled) return [];
+  
+  try {
+    if (fs.existsSync(PROXY.file)) {
+      const proxyContent = fs.readFileSync(PROXY.file, 'utf8');
+      const proxies = proxyContent
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#'));
+      
+      if (proxies.length > 0) {
+        PROXY.list = proxies;
+        console.log(`✓ Loaded ${proxies.length} proxy(s) from ${PROXY.file}\n`);
+        return proxies;
+      } else {
+        console.log(`⚠ ${PROXY.file} is empty\n`);
+        PROXY.enabled = false;
+        return [];
+      }
+    } else {
+      console.log(`⚠ ${PROXY.file} not found\n`);
+      PROXY.enabled = false;
+      return [];
+    }
+  } catch (e) {
+    console.log(`⚠ Error loading proxy: ${e.message}\n`);
+    PROXY.enabled = false;
+    return [];
+  }
+}
+
+// Get proxy berdasarkan mode
+function getProxy(index) {
+  if (!PROXY.enabled || PROXY.list.length === 0) return null;
+  
+  if (PROXY.mode === 'rotating') {
+    return PROXY.list[index % PROXY.list.length];
+  } else {
+    return PROXY.list[0]; // Static: pakai proxy pertama
+  }
 }
 
 // Generate random string
@@ -78,7 +101,6 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function saveAccountData(accountData) {
   let existingData = [];
   
-  // Load existing data
   if (fs.existsSync(CONFIG.accountDataFile)) {
     try {
       const fileContent = fs.readFileSync(CONFIG.accountDataFile, 'utf8');
@@ -88,13 +110,11 @@ function saveAccountData(accountData) {
     }
   }
   
-  // Add new account
   existingData.push({
     ...accountData,
     registeredAt: new Date().toISOString()
   });
   
-  // Save
   fs.writeFileSync(CONFIG.accountDataFile, JSON.stringify(existingData, null, 2));
 }
 
@@ -113,7 +133,6 @@ async function registerWithBrowser(userData, proxyUrl = null) {
       ]
     };
     
-    // Add proxy jika ada
     if (proxyUrl) {
       launchOptions.args.push(`--proxy-server=${proxyUrl}`);
     }
@@ -122,7 +141,6 @@ async function registerWithBrowser(userData, proxyUrl = null) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
 
-    // Buka halaman register
     await page.goto(CONFIG.registerURL, {
       waitUntil: 'networkidle2',
       timeout: 30000
@@ -130,10 +148,8 @@ async function registerWithBrowser(userData, proxyUrl = null) {
 
     await delay(2000);
 
-    // Tunggu form
     await page.waitForSelector('input[placeholder="Display Name"]', { timeout: 10000 });
     
-    // Clear inputs
     await page.evaluate(() => {
       document.querySelectorAll('input').forEach(input => {
         if (input.type !== 'submit') input.value = '';
@@ -142,7 +158,6 @@ async function registerWithBrowser(userData, proxyUrl = null) {
 
     await delay(1000);
 
-    // Fill form
     await page.click('input[placeholder="Display Name"]');
     await delay(200);
     await page.type('input[placeholder="Display Name"]', userData.displayName, { delay: 80 });
@@ -158,7 +173,6 @@ async function registerWithBrowser(userData, proxyUrl = null) {
     await page.type('input[placeholder="Password"]', userData.password, { delay: 80 });
     await delay(800);
 
-    // Click submit
     const buttonClicked = await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
       const createButton = buttons.find(btn => 
@@ -175,7 +189,6 @@ async function registerWithBrowser(userData, proxyUrl = null) {
       throw new Error('Submit button not found');
     }
 
-    // Tunggu response
     try {
       await Promise.race([
         page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }),
@@ -189,7 +202,6 @@ async function registerWithBrowser(userData, proxyUrl = null) {
     let success = false;
     let message = '';
 
-    // Check success
     if (currentURL.includes('cryptowave.blog') && !currentURL.includes('/auth')) {
       success = true;
       message = 'Success - Redirected';
@@ -240,21 +252,21 @@ async function registerWithBrowser(userData, proxyUrl = null) {
 async function registerMultiple(count, options = {}) {
   console.clear();
   
-  // Load proxy dari file
-  const proxyUrl = loadProxy();
-  
   console.log('═══════════════════════════════════════════════════════════');
   console.log('          CRYPTOWAVE AUTO REGISTER');
   console.log('═══════════════════════════════════════════════════════════');
   console.log(`Total Accounts  : ${count}`);
   console.log(`Referral Code   : ${CONFIG.referralCode}`);
-  console.log(`Proxy Status    : ${PROXY.enabled ? 'ENABLED (Auto-Rotate)' : 'DISABLED'}`);
-  if (proxyUrl) {
-    // Hide credentials, show only host:port
-    const proxyDisplay = proxyUrl.includes('@') 
-      ? proxyUrl.split('@')[1] 
-      : proxyUrl;
-    console.log(`Proxy URL       : ${proxyDisplay}`);
+  console.log(`Proxy Status    : ${PROXY.enabled ? `ENABLED (${PROXY.mode.toUpperCase()})` : 'DISABLED'}`);
+  if (PROXY.enabled && PROXY.list.length > 0) {
+    if (PROXY.mode === 'rotating') {
+      console.log(`Proxy Count     : ${PROXY.list.length} proxies`);
+    } else {
+      const proxyDisplay = PROXY.list[0].includes('@') 
+        ? PROXY.list[0].split('@')[1] 
+        : PROXY.list[0];
+      console.log(`Proxy URL       : ${proxyDisplay}`);
+    }
   }
   console.log(`Password        : ${options.password || 'SecurePass123!'}`);
   console.log('═══════════════════════════════════════════════════════════\n');
@@ -273,6 +285,8 @@ async function registerMultiple(count, options = {}) {
       displayName: options.displayNames?.[i] || generateDisplayName()
     };
 
+    const proxyUrl = getProxy(i);
+    
     const result = await registerWithBrowser(userData, proxyUrl);
     results.push(result);
     
@@ -294,7 +308,6 @@ async function registerMultiple(count, options = {}) {
       console.log(`    └─ ${result.error || result.message}`);
     }
 
-    // Delay antar akun
     if (i < count - 1) {
       const delayTime = options.delay || 3000;
       const delaySeconds = Math.floor(delayTime / 1000);
@@ -309,7 +322,6 @@ async function registerMultiple(count, options = {}) {
   const endTime = Date.now();
   const duration = ((endTime - startTime) / 1000).toFixed(2);
   
-  // Summary
   console.log('═══════════════════════════════════════════════════════════');
   console.log('                    SUMMARY');
   console.log('═══════════════════════════════════════════════════════════');
@@ -343,6 +355,27 @@ async function main() {
   console.log('═══════════════════════════════════════════════════════════');
   console.log('          CRYPTOWAVE AUTO REGISTER v2.0');
   console.log('═══════════════════════════════════════════════════════════\n');
+
+  // Tanya pakai proxy atau tidak
+  const useProxyInput = await question('Use proxy? (y/n): ');
+  const useProxy = useProxyInput.toLowerCase().trim() === 'y';
+  
+  if (useProxy) {
+    PROXY.enabled = true;
+    
+    // Tanya mode proxy
+    const proxyModeInput = await question('Proxy mode? (1=Static, 2=Rotating): ');
+    PROXY.mode = proxyModeInput.trim() === '2' ? 'rotating' : 'static';
+    
+    // Load proxy
+    loadProxy();
+    
+    if (!PROXY.enabled) {
+      console.log('⚠ Continuing without proxy...\n');
+    }
+  } else {
+    console.log('✓ Running without proxy\n');
+  }
 
   // Input jumlah akun
   const countInput = await question('How many accounts to register? ');
