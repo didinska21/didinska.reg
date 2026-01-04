@@ -1,1 +1,9 @@
-http://81634571-zone-custom-region-SG-sessid-oS6ESp74-sessTime-5:g93c7o0n@as.proxys5.net:6200
+# Referral Code
+REFERRAL_CODE=EARN1D7265
+
+# Headless mode (true/false)
+HEADLESS=true
+
+# File paths
+ACCOUNT_FILE=account_data.json
+PROXY_FILE=proxy.txt
